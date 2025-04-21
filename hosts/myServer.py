@@ -26,9 +26,13 @@ def handle_client(host, port):
                 print("\nshutting down server..")
                 break
 
-
-            print(f"connected by {addr}")
-            receive_files(conn)
+            pid = os.fork()  # fork child, parent and child will have a copy of the listening and communication sockets
+            if pid == 0:     # child forked successfully
+                s.close()    # close listening socket and handle file reception using child
+                receive_files(conn, addr) # child still uses communication socket
+            else:
+                conn.close() # close the copy of the communication socket the parent got since child handles it 
+                             # parent makes use of the listening socket to accept new connections
 
     finally:
         try:
@@ -39,7 +43,8 @@ def handle_client(host, port):
         print("server socket closed")
 
 
-def receive_files(conn):
+def receive_files(conn, addr):
+    print(f"child forked, [PID {os.getpid()}] connected by {addr}")
     fd = conn.fileno() # get fd to reference the socket for each new client connection
 
     try:
@@ -66,12 +71,14 @@ def receive_files(conn):
             os.write(f, content)
             os.close(f)
 
-            print(f"Received and saved: {filename}")
+            print(f"[PID {os.getpid()}] Received and saved: {filename}")
 
     except Exception as e:
         os.write(2, f"Error: {str(e)}\n".encode())
     finally:
         conn.close() # close file descriptor referencing communication socket
+        print(f"[PID {os.getpid()}]  connection closed")
+        os._exit(0) # child exits
 
 if __name__ == "__main__":
     handle_client("0.0.0.0", 50001)
