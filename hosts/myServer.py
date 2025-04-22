@@ -1,16 +1,9 @@
 import socket
 import os
 import sys
+sys.path.append('/home/alex/OSHomeworks/Lab3/s25-archiver-Azavala16')
 
-def recv_exact(fd, size):
-    data = b''
-    while len(data) < size:
-        chunk = os.read(fd, size - len(data))
-        if not chunk:
-            raise ConnectionError("connection closed prematurely")
-        data += chunk
-    return data
-
+from mytar import extract_archive
 
 def handle_client(host, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -30,15 +23,12 @@ def handle_client(host, port):
             if pid == 0:     # child forked successfully
                 s.close()    # close listening socket and handle file reception using child
                 receive_files(conn, addr) # child still uses communication socket
+                os._exit(0)
             else:
                 conn.close() # close the copy of the communication socket the parent got since child handles it 
                              # parent makes use of the listening socket to accept new connections
 
     finally:
-        try:
-            s.shutdown(socket.SHUT_RDWR) # end communication from both ends of the socket
-        except OSError:
-            pass
         s.close() # free file descriptor referencing listening socket
         print("server socket closed")
 
@@ -46,39 +36,19 @@ def handle_client(host, port):
 def receive_files(conn, addr):
     print(f"child forked, [PID {os.getpid()}] connected by {addr}")
     fd = conn.fileno() # get fd to reference the socket for each new client connection
+    
+    stdin_backup = os.dup(0) # make copy of stdin
+    os.dup2(fd, 0)           # make the fd for communication socket point to fd0
 
     try:
-        while True:
-            # get 4 bytes for filename length
-            try:
-                raw_fname_len = recv_exact(fd, 4)
-            except ConnectionError:
-                break
-            fname_len = int.from_bytes(raw_fname_len, 'big')
-
-            # get filename
-            filename = recv_exact(fd, fname_len).decode()
-
-            # get 4 bytes for content length
-            raw_content_len = recv_exact(fd, 4)
-            content_len = int.from_bytes(raw_content_len, 'big')
-
-            # get content
-            content = recv_exact(fd, content_len)
-
-            # save file
-            f = os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-            os.write(f, content)
-            os.close(f)
-
-            print(f"[PID {os.getpid()}] Received and saved: {filename}")
-
-    except Exception as e:
-        os.write(2, f"Error: {str(e)}\n".encode())
+        extract_archive()
+        print(f"[PID {os.getpid()}] extraction complete")
     finally:
-        conn.close() # close file descriptor referencing communication socket
-        print(f"[PID {os.getpid()}]  connection closed")
-        os._exit(0) # child exits
+        os.dup2(stdin_backup, 0) # return fd0 to point stdin
+        os.close(stdin_backup)   # close backup
+        conn.close()             # close communication socket
+        print(f"[PID {os.getpid()} connection closed]")
+
 
 if __name__ == "__main__":
     handle_client("0.0.0.0", 50001)

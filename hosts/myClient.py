@@ -3,48 +3,24 @@ import socket
 import os
 import sys
 
-def send_file(sock, filepath):
-    # extract the filename from the path and turn to bytes
-    filename = os.path.basename(filepath).encode()
-    fname_len = len(filename)
-
-    fd = os.open(filepath, os.O_RDONLY) # open file to send
-    content = b''
-    while True:
-        chunk = os.read(fd, 4096) # read contents in chunks
-        if not chunk:
-            break
-        content += chunk
-    os.close(fd)
-
-    content_len = len(content) # get length of content to keep track of what is being sent to the server
-    
-    # encode the filename length into 4 bytes using big-endian   (i.e 00 00 00 07 "foo.txt")
-    os.write(sock.fileno(), fname_len.to_bytes(4, 'big'))
-
-    # send N bytes for the filename in ASCII
-    os.write(sock.fileno(), filename)
-
-    # encode content length into 4 bytes as well
-    os.write(sock.fileno(), content_len.to_bytes(4, 'big'))
-    
-    # send M bytes for content
-    total_sent = 0
-    while total_sent < content_len:
-        sent = os.write(sock.fileno(), content[total_sent:])
-        total_sent += sent
-
-    print(f"Sent: {filepath}")
-
+sys.path.append('/home/alex/OSHomeworks/Lab3/s25-archiver-Azavala16')
+from mytar import create_archive # use create_archive functionality
 
 def handle_connection(host, port, files):
-    sock = socket.create_connection((proxy_host, proxy_port))
-    for file in files:
-        send_file(sock, file)
-    
-    sock.shutdown(socket.SHUT_WR)
-    sock.close()
+    sock = socket.create_connection((host, port))
 
+    sock_fd = sock.fileno()   # make a fd to to reference connection socket fd3
+    stdout_backup = os.dup(1) # make a copy of stdout at fd4
+    os.dup2(sock_fd, 1)       # make a copy of the reference to the socket where stdout was (fd1)
+
+    try:
+        create_archive(files) # archive files and send them through socket which is now referenced by fd1
+    finally:
+        os.dup2(stdout_backup, 1) # return stdout to reference fd1
+        os.close(stdout_backup)
+        sock.shutdown(socket.SHUT_WR)
+        sock.close()
+        print("Archive sent successfully")
 
 
 if __name__ == "__main__":
